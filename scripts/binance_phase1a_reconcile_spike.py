@@ -14,7 +14,7 @@ against one tiny Binance Spot Testnet market fill:
 6. run the same built-in reconciler again;
 7. save redaction-safe evidence under ~/.vibe-trading/diagnostics/.
 
-No real-money host is accepted.  Without --execute this script performs only
+No real-money host is accepted. Without --execute this script performs only
 read-only environment/market checks and does not create reconcile state or send
 an order.
 """
@@ -31,8 +31,18 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[1]
+# Prefer the current working directory when the script is downloaded to a temp
+# location and launched from the repository root. Fall back to the script's own
+# repository location when it is executed from scripts/ in a checked-out branch.
+CWD = Path.cwd().resolve()
+SCRIPT_ROOT = Path(__file__).resolve().parents[1]
+ROOT = CWD if (CWD / "agent").is_dir() else SCRIPT_ROOT
 AGENT_DIR = ROOT / "agent"
+if not AGENT_DIR.is_dir():
+    raise SystemExit(
+        "Could not locate the Vibe-Trading agent/ directory. Run this script "
+        "from the repository root or from scripts/ inside the repository."
+    )
 if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
 
@@ -94,8 +104,14 @@ def _exchange_and_market(cfg: Any, symbol: str) -> tuple[Any, dict[str, Any]]:
 
 
 def _minimum_notional(market: dict[str, Any]) -> float | None:
+    limits = market.get("limits")
+    if not isinstance(limits, dict):
+        return None
+    cost = limits.get("cost")
+    if not isinstance(cost, dict):
+        return None
     try:
-        value = market.get("limits", {}).get("cost", {}).get("min")
+        value = cost.get("min")
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
@@ -126,7 +142,7 @@ def _balance_reader(cfg: Any):
 
 def _open_orders_reader(cfg: Any, exchange: Any, symbol: str):
     def read() -> list[dict[str, Any]]:
-        # Intentionally symbol-scoped.  The connector's generic all-symbol call
+        # Intentionally symbol-scoped. The connector's generic all-symbol call
         # is one of the behaviors Phase 1a is designed to avoid conflating with
         # the position-diff result.
         raw = binance_sdk._read_with_clock_retry(
