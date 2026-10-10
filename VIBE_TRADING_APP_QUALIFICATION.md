@@ -19,7 +19,7 @@ This track is about **platform capability**, not strategy profitability.
 - **A19 — pass:** one simple deterministic target-position strategy executed automatically on Testnet.
 - **A20 — pass:** after process restart, persistent target state plus broker truth recomputation produced `hold` rather than a duplicate order.
 - **A21 — pass for brief qualification run:** the real scheduler fired two unattended read-only ticks; both emitted audits, heartbeat was fresh, and balances were unchanged.
-- **A22 — next:** assess how much retained custom integration code would be required for a reusable Binance Testnet runner and make the final Track A GO / STOP decision.
+- **A22 — pass:** retained Binance Testnet integration is a bounded adapter/wiring task, not a rebuild of the trading engine. **Final Track A verdict: GO — keep Vibe-Trading as the platform.**
 
 ### A16 root cause
 
@@ -220,6 +220,39 @@ Known integration gaps do **not** count as a failure when they can be handled th
 A STOP signal is **new** evidence that the work requires changing the core semantics of `LiveRunner` or rebuilding major subsystems such as its lifecycle, scheduler, execution model, or crash/recovery model.
 
 A small generic compatibility hook in `src/live` is not automatically a STOP; a redesign of core runtime behavior is.
+
+## A22 — retained custom integration assessment
+
+**Verdict: PASS.** The STOP condition was not triggered.
+
+The Phase 1b qualification branch added 707 lines across two disposable diagnostic scripts (`510 + 197`) plus documentation. It did **not** modify `LiveRunner`, the scheduler, heartbeat/liveness, audit, mandate, halt handling, or other core runtime files.
+
+Those 707 lines materially overstate the amount of code that should be retained. They include qualification-only CLI handling, defensive Testnet guards, diagnostics/printing, observations, one-off mandate construction, and scheduler probe logic. The reusable platform work is narrower:
+
+- Binance Testnet runner factory/wiring around the existing `LiveRunner` injection points;
+- symbol-scoped Binance open-order reads and normalized account readers;
+- a small Binance/Testnet reconciliation adapter for the market-order Testnet mode;
+- a reusable strategy/target-position adapter that supplies deterministic decisions through `agent_caller`;
+- normal route/config integration and tests.
+
+Estimated retained Testnet integration is roughly **200–350 lines of product code plus tests**, depending on how much of the existing Binance connector can be reused directly. This is a bounded adapter/integration task, not a second trading engine.
+
+For later real-money use, the durable Binance pre-submit ownership/recovery adapter remains additional work. The previously identified shape is roughly **150–250 product lines plus tests**: create and persist a client order id before submission, resolve uncertain submissions after restart, record fills/fees/status, and reconcile expected balance changes with tolerance. That work extends the existing runtime safety model; it does not require replacing the lifecycle, scheduler, audit, mandate, or execution loop.
+
+### Final Track A decision
+
+**GO — KEEP Vibe-Trading as the base platform.**
+
+Why:
+
+- the existing `LiveRunner` executed the automated Testnet path without core semantic changes;
+- restart/no-duplicate behavior for the Testnet target-position mode was demonstrated;
+- scheduler, heartbeat, and audit were reused rather than rebuilt;
+- public signal data and Testnet execution remained separated;
+- the remaining Binance work fits the framework's existing dependency-injection boundaries;
+- no evidence requires building a separate scheduler, state engine, lifecycle, execution loop, audit system, or kill-switch subsystem.
+
+Track A is therefore complete. The next independent track is **Track B: identify and validate a genuinely good strategy**. Strategy #2 remains only a platform test instrument and is not promoted to live use by this decision.
 
 ## Production boundary
 
