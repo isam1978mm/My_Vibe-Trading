@@ -4,7 +4,13 @@
 This script intentionally cannot place orders. It loads the existing Phase 1b
 LiveRunner spike from the same directory, reuses its Binance Testnet readers and
 target-position caller with execute=False, then exercises LiveRunner.run_loop()
-through the real Scheduler for a few seconds.
+through the real Scheduler with exactly two one-shot jobs.
+
+The probe deliberately avoids a short recurring interval. Binance reads are
+synchronous and can take longer than a very short cadence; using a recurring
+1-second job can keep the scheduler continuously overdue and starve a separate
+async timeout. Two one-shot jobs test scheduler dispatch, LiveRunner ticks,
+heartbeat, and audit behavior while making the probe intrinsically bounded.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ import asyncio
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +42,7 @@ spec.loader.exec_module(base)
 
 from src.live.runtime.liveness import is_runner_alive, last_tick  # noqa: E402
 from src.live.runtime.runner import LiveRunner  # noqa: E402
-from src.live.runtime.scheduler import Scheduler  # noqa: E402
-from src.live.runtime.triggers import Trigger  # noqa: E402
+from src.live.runtime.scheduler import Job, Scheduler  # noqa: E402
 
 
 async def run_probe(seconds: float) -> int:
@@ -81,7 +87,7 @@ async def run_probe(seconds: float) -> int:
         read_open_orders=open_orders_reader,
         scheduler=scheduler,
         load_mandate_fn=lambda _broker: base._build_test_mandate(),
-        triggers=[Trigger.interval(1000)],
+        triggers=[],
         session_id="phase1b-binance-testnet-scheduler",
     )
     holder["runner"] = runner
@@ -89,13 +95,32 @@ async def run_probe(seconds: float) -> int:
     print("Phase 1b scheduler/heartbeat probe")
     print("  broker writes : DISABLED")
     print(f"  execution host: {cfg.host}")
-    print("  cadence       : 1 second")
-    print(f"  duration      : {seconds:g} seconds")
+    print("  schedule      : exactly two one-shot ticks")
+    print(f"  settle wait   : {seconds:g} seconds")
     print(f"  BTC before    : {before_btc}")
     print(f"  USDT before   : {before_usdt}")
 
-    runner.run_loop()
+    now_ms = int(time.time() * 1000)
+    jobs = [
+        Job(
+            id=f"{base.BROKER_KEY}-phase1b-once-1",
+            next_run_at=now_ms,
+            schedule="once",
+            payload={"broker": base.BROKER_KEY, "probe": "phase1b", "ordinal": 1},
+        ),
+        Job(
+            id=f"{base.BROKER_KEY}-phase1b-once-2",
+            next_run_at=now_ms,
+            schedule="once",
+            payload={"broker": base.BROKER_KEY, "probe": "phase1b", "ordinal": 2},
+        ),
+    ]
+
+    runner.run_loop(jobs=jobs)
     try:
+        # The two broker-backed ticks may themselves take longer than this wait.
+        # Once they return, no recurring jobs remain, so control is guaranteed
+        # to come back to this coroutine and the probe can stop cleanly.
         await asyncio.sleep(seconds)
     finally:
         await runner.stop_loop()
@@ -132,8 +157,8 @@ async def run_probe(seconds: float) -> int:
     print("\nScheduler probe summary")
     print(json.dumps(summary, indent=2))
 
-    if len(tick_results) < 2:
-        print("\nRESULT: INCONCLUSIVE — fewer than two scheduled ticks fired.")
+    if len(tick_results) != 2:
+        print(f"\nRESULT: FAIL — expected exactly two scheduled ticks, got {len(tick_results)}.")
         return 2
     if not alive:
         print("\nRESULT: FAIL — scheduler fired, but heartbeat is not fresh.")
@@ -145,23 +170,26 @@ async def run_probe(seconds: float) -> int:
         print("\nRESULT: FAIL — balances changed during a read-only scheduler probe.")
         return 5
 
-    print("\nRESULT: PASS — scheduler fired repeatedly, heartbeat is fresh, audits were written, and no broker write occurred.")
+    print(
+        "\nRESULT: PASS — exactly two scheduled ticks fired, heartbeat is fresh, "
+        "audits were written, and no broker write occurred."
+    )
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Read-only LiveRunner scheduler/heartbeat qualification probe"
+        description="Read-only bounded LiveRunner scheduler/heartbeat qualification probe"
     )
     parser.add_argument(
         "--seconds",
         type=float,
-        default=4.0,
-        help="Probe duration in seconds (default 4; allowed 3-10).",
+        default=1.0,
+        help="Post-dispatch settle wait in seconds (default 1; allowed 0.5-5).",
     )
     args = parser.parse_args()
-    if not (3.0 <= args.seconds <= 10.0):
-        parser.error("--seconds must be between 3 and 10")
+    if not (0.5 <= args.seconds <= 5.0):
+        parser.error("--seconds must be between 0.5 and 5")
     return asyncio.run(run_probe(args.seconds))
 
 
