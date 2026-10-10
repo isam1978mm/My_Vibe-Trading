@@ -13,6 +13,7 @@ This track is about **platform capability**, not strategy profitability.
 - **A14 — complete:** Vibe-Trading has a real autonomous trading runtime with scheduler, audit, kill switch, mandate support, reconciliation, and broker execution plumbing.
 - **A15 — complete:** `LiveRunner` is reusable in principle for Binance, but Binance Testnet is not wired into the managed runner path today.
 - **A16 — fail today for Binance:** the existing runtime state/recovery model cannot safely attribute Binance Spot balance changes to the runner's own orders.
+- **Phase 1a — complete:** real Binance Spot Testnet evidence confirmed the predicted post-fill `unknown_fill` behavior in the unchanged built-in reconciler.
 
 ### A16 root cause
 
@@ -60,6 +61,32 @@ No `LiveRunner` integration and no production fix in this phase.
 The spike succeeds if it gives reproducible evidence for the current behavior, regardless of whether reconciliation passes or fails.
 
 Expected result from code reading: the post-fill reconcile should halt with `unknown_fill` because BTC and/or USDT quantities changed from the saved baseline.
+
+### Phase 1a observed result — 2026-10-10
+
+The probe was run against Binance Spot Testnet with one 6 USDT BTC/USDT market BUY.
+
+Baseline reconcile:
+
+- `had_prior_state = False`
+- `is_safe = True`
+- `requires_halt = False`
+- `state_persisted = True`
+- no deltas
+
+After the Testnet fill:
+
+- BTC changed from `1.0` to `1.00007`
+- USDT changed from `9999.9921558` to `9994.1961558`
+- the second built-in reconcile returned `is_safe = False`
+- `requires_halt = True`
+- `state_persisted = False`
+- `unknown_fill` was reported for both `BTC` and `USDT`
+- 517 position deltas were examined because the Testnet account contains many non-zero assets
+
+This confirms the A16 prediction with real Testnet evidence: the unchanged reconciler treats the runner's own normal Binance Spot fill as unexplained balance drift and refuses to advance state.
+
+The local evidence file was written under `~/.vibe-trading/diagnostics/` and is intentionally not committed.
 
 ## Phase 1b — direct `LiveRunner` qualification harness
 
