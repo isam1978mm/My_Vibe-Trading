@@ -14,6 +14,7 @@ This track is about **platform capability**, not strategy profitability.
 - **A15 — complete:** `LiveRunner` is reusable in principle for Binance, but Binance Testnet is not wired into the managed runner path today.
 - **A16 — fail today for Binance:** the existing runtime state/recovery model cannot safely attribute Binance Spot balance changes to the runner's own orders.
 - **Phase 1a — complete:** real Binance Spot Testnet evidence confirmed the predicted post-fill `unknown_fill` behavior in the unchanged built-in reconciler.
+- **Phase 1b — in progress:** the direct `LiveRunner` harness successfully completed a read-only dry run through reconciliation and target-position decisioning without changing `LiveRunner` core behavior.
 
 ### A16 root cause
 
@@ -111,6 +112,27 @@ Then test:
 3. stop/restart and re-read broker truth;
 4. another tick without a duplicate order;
 5. audit/heartbeat/scheduler behavior.
+
+### Phase 1b read-only dry run — 2026-10-10
+
+The qualification harness was run with writes disabled and a target increment of 6 USDT equivalent.
+
+Observed:
+
+- execution profile resolved to Binance Spot Testnet;
+- market data came from public Binance mainnet with no credentials;
+- Testnet balances read successfully;
+- target state was initialized from the existing BTC balance rather than treating the preloaded Testnet BTC as strategy-owned;
+- `LiveRunner.run_once()` completed with `outcome = invoked`;
+- the deterministic caller returned `action = would_buy`;
+- desired BTC was `1.000142471470398` versus actual BTC `1.00007`;
+- the computed gap was about 6 USDT;
+- an audit id was emitted;
+- no broker write occurred.
+
+This proves the existing `LiveRunner` can reach the Binance-specific reconciliation and deterministic target-position decision path using its existing dependency injection points, without changing `LiveRunner` core semantics.
+
+The next Phase 1b step is one explicitly approved Testnet market write, followed by a second tick to verify target-position duplicate avoidance and then a restart test.
 
 ## GO / STOP rule
 
