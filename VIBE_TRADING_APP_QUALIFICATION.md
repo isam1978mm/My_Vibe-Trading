@@ -14,7 +14,7 @@ This track is about **platform capability**, not strategy profitability.
 - **A15 — complete:** `LiveRunner` is reusable in principle for Binance, but Binance Testnet is not wired into the managed runner path today.
 - **A16 — fail today for Binance:** the existing runtime state/recovery model cannot safely attribute Binance Spot balance changes to the runner's own orders.
 - **Phase 1a — complete:** real Binance Spot Testnet evidence confirmed the predicted post-fill `unknown_fill` behavior in the unchanged built-in reconciler.
-- **Phase 1b — in progress:** the direct `LiveRunner` harness successfully completed a read-only dry run through reconciliation and target-position decisioning without changing `LiveRunner` core behavior.
+- **Phase 1b — in progress:** the direct `LiveRunner` harness has now completed an automatic Testnet market trade, a subsequent no-duplicate tick, and a fresh-process restart/no-duplicate check without changing `LiveRunner` core behavior. Scheduler/run-loop and heartbeat behavior remain to be checked.
 
 ### A16 root cause
 
@@ -130,9 +130,42 @@ Observed:
 - an audit id was emitted;
 - no broker write occurred.
 
-This proves the existing `LiveRunner` can reach the Binance-specific reconciliation and deterministic target-position decision path using its existing dependency injection points, without changing `LiveRunner` core semantics.
+This proved the existing `LiveRunner` can reach the Binance-specific reconciliation and deterministic target-position decision path using its existing dependency injection points, without changing `LiveRunner` core semantics.
 
-The next Phase 1b step is one explicitly approved Testnet market write, followed by a second tick to verify target-position duplicate avoidance and then a restart test.
+### Phase 1b Testnet trade + duplicate/restart check — 2026-10-10
+
+With explicit operator approval, one armed `LiveRunner.run_once()` tick was executed.
+
+Observed on the write tick:
+
+- decision: `action = buy`
+- Binance Spot Testnet order id: `1210202`
+- order type: `market`
+- order status: `closed`
+- filled amount: `0.00007 BTC`
+- reported price: about `83030.02 USDT/BTC`
+- target BTC remained `1.000142471470398`
+- an audit id was emitted
+
+The next invocation was started as a fresh Python process with writes disabled. That makes it a practical stop/restart check for the qualification harness: the process had to reload the persistent target state and recompute from current broker truth.
+
+Observed after restart:
+
+- Testnet BTC: `1.00014`
+- Testnet USDT: `9988.3840544`
+- target BTC: `1.000142471470398`
+- remaining BTC gap: `0.0000024714703978911956`
+- remaining gap value: about `0.2052 USDT`
+- decision: `action = hold`
+- reason: `target reached within exchange minimum/lot tolerance`
+- no duplicate order was submitted
+- another audit id was emitted
+
+The USDT decrease from the pre-trade Phase 1b balance (`9994.1961558`) to the post-trade balance (`9988.3840544`) is about `5.8121 USDT`, matching one `0.00007 BTC` fill near `83030 USDT/BTC`. This supports that only one Phase 1b Testnet buy occurred during the observed run.
+
+This is positive evidence for the smaller Testnet-first design: target-position recomputation plus market-only execution avoided a duplicate on the next tick and across a fresh process restart, using the existing `LiveRunner` injection model rather than editing its core.
+
+**Still not proven:** long-running `run_loop` scheduling/heartbeat behavior, and production-grade crash recovery for an order whose broker response is lost. The latter remains explicitly out of scope for Testnet qualification and is mandatory before real funds.
 
 ## GO / STOP rule
 
