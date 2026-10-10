@@ -14,7 +14,12 @@ This track is about **platform capability**, not strategy profitability.
 - **A15 — complete:** `LiveRunner` is reusable in principle for Binance, but Binance Testnet is not wired into the managed runner path today.
 - **A16 — fail today for Binance:** the existing runtime state/recovery model cannot safely attribute Binance Spot balance changes to the runner's own orders.
 - **Phase 1a — complete:** real Binance Spot Testnet evidence confirmed the predicted post-fill `unknown_fill` behavior in the unchanged built-in reconciler.
-- **Phase 1b — in progress:** the direct `LiveRunner` harness has now completed an automatic Testnet market trade, a subsequent no-duplicate tick, and a fresh-process restart/no-duplicate check without changing `LiveRunner` core behavior. Scheduler/run-loop and heartbeat behavior remain to be checked.
+- **Phase 1b — complete / PASS for Testnet qualification:** the direct `LiveRunner` harness completed an automatic Testnet market trade, a no-duplicate second tick, a fresh-process restart/no-duplicate check, and corrected scheduler/heartbeat/audit checks without changing `LiveRunner` core behavior.
+- **A18 — pass:** signal/market data came from public Binance mainnet while all broker writes stayed on Binance Spot Testnet.
+- **A19 — pass:** one simple deterministic target-position strategy executed automatically on Testnet.
+- **A20 — pass:** after process restart, persistent target state plus broker truth recomputation produced `hold` rather than a duplicate order.
+- **A21 — pass for brief qualification run:** the real scheduler fired two unattended read-only ticks; both emitted audits, heartbeat was fresh, and balances were unchanged.
+- **A22 — next:** assess how much retained custom integration code would be required for a reusable Binance Testnet runner and make the final Track A GO / STOP decision.
 
 ### A16 root cause
 
@@ -165,7 +170,41 @@ The USDT decrease from the pre-trade Phase 1b balance (`9994.1961558`) to the po
 
 This is positive evidence for the smaller Testnet-first design: target-position recomputation plus market-only execution avoided a duplicate on the next tick and across a fresh process restart, using the existing `LiveRunner` injection model rather than editing its core.
 
-**Still not proven:** long-running `run_loop` scheduling/heartbeat behavior, and production-grade crash recovery for an order whose broker response is lost. The latter remains explicitly out of scope for Testnet qualification and is mandatory before real funds.
+### Phase 1b scheduler / heartbeat / audit check — 2026-10-10
+
+The first scheduler probe used a 1-second recurring cadence while each tick performed synchronous Binance network reads. Because a tick could take longer than the recurrence interval, the schedule remained overdue and the diagnostic kept firing `hold` ticks instead of reaching its intended wall-clock stop. Broker writes were disabled throughout; this exposed a flaw in the probe configuration, not repeated trading.
+
+The probe was corrected to use exactly two one-shot scheduler jobs. The corrected read-only run observed:
+
+- exactly `2` scheduled ticks;
+- both ticks returned `outcome = invoked` and `action = hold`;
+- both ticks emitted audit ids;
+- `heartbeat_fresh = true`;
+- BTC remained `1.00014` before and after;
+- USDT remained `9988.3840544` before and after;
+- `balances_unchanged = true`;
+- no broker write occurred.
+
+Corrected probe result: **PASS**.
+
+This confirms that the real `Scheduler` can invoke the existing `LiveRunner`, heartbeat updates are visible, audit records are emitted, and the runner can be stopped cleanly in this Binance Testnet qualification setup.
+
+### Phase 1b verdict
+
+**PASS for Testnet platform qualification.**
+
+The evidence now supports all intended Phase 1b checks without a core `LiveRunner` rewrite:
+
+- automatic Testnet market trade;
+- no duplicate on the next tick;
+- fresh-process restart and recomputation from broker truth;
+- no duplicate after restart;
+- public-mainnet-data / Testnet-execution separation;
+- scheduler invocation;
+- fresh heartbeat;
+- audit emission.
+
+This is not a production crash-safety proof. The unclosed crash window where Binance accepts an order but the application dies before recording/observing the result still requires durable pre-submit ownership before real funds.
 
 ## GO / STOP rule
 
